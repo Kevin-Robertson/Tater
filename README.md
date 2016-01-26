@@ -7,7 +7,8 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 Potato - https://github.com/foxglovesec/Potato   
 
 # Notes
-Use caution, this is still very much in a proof of concept stage. It’s only been tested on Windows 7. It’s also still missing a lot of the features in Potato.exe.   
+Use caution, this is still very much in a proof of concept stage. It’s only been tested on Windows 7. It’s also still missing a lot of the features in Potato.exe. 
+  
 The most likely thing to go wrong is that the HTTP listener will not give port 80 without closing out your PowerShell process.   
 
 # Usage
