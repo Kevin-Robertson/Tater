@@ -1,5 +1,5 @@
 # Tater
-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit. This is mainly pieced together from existing Inveigh code.   
+Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit. Tater is mainly pieced together from existing Inveigh code.   
 
 # Credit
 All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone else that helped work out the details for this exploit.  
@@ -7,9 +7,9 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 Potato - https://github.com/foxglovesec/Potato   
 
 # Notes
-Use caution, this is still very much in a proof of concept stage. It’s only been tested on Windows 7. It’s also still missing a lot of the features in Potato.exe. 
+Use caution, this is still very much in a proof of concept stage. It’s only been tested on Windows 7. It's also missing some of the advanced features found in Potato. 
   
-The most likely thing to go wrong is that the HTTP listener will not give port 80 without closing out your PowerShell process.   
+The most likely thing to go wrong is that the HTTP listener will not release the port 80 binding on exit. If this happens, closing out your PowerShell process will remove the binding.     
 
 # Usage
 To import with Import-Module:   
