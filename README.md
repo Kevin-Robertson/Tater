@@ -1,5 +1,5 @@
 # Tater
-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation without any external libraries. This is mainly pieced together from existing Inveigh code.   
+Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit. This is mainly pieced together from existing Inveigh code.   
 
 # Credit
 All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone else that helped work out the details for this exploit.  
