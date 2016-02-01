@@ -1,5 +1,5 @@
 # Tater
-Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit. Tater is mainly pieced together from existing Inveigh code.   
+Tater is a PowerShell implementation of the Hot Potato Windows Privilege Escalation exploit.    
 
 # Credit
 All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone else that helped work out the details for this exploit.  
@@ -7,9 +7,7 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 Potato - https://github.com/foxglovesec/Potato   
 
 # Notes
-Use caution, this is still very much in a proof of concept stage. It’s only been tested on Windows 7. It's also missing some of the advanced features found in Potato. 
-  
-The most likely thing to go wrong is that the HTTP listener will not release the port 80 binding on exit. If this happens, closing out your PowerShell process will remove the binding.     
+This version has been tested by me on Windows 7 and Windows 10. I will hopefully be able to test it on the remaining Windows versions soon. Feel free to open issues here or reach out on Twitter @kevin_robertson with successes or failures for the remaining OS versions. 
 
 # Usage
 To import with Import-Module:   
@@ -18,9 +16,16 @@ Import-Module ./Tater.ps1
 To import using dot source method:   
 . ./Tater.ps1  
  
-Invoke-Tater -Command "net user tater Winter2016 /add && net localgroup administrators tater /add"   
+Invoke-Tater -Trigger 1 -Command "net user tater Winter2016 /add && net localgroup administrators tater /add"   
 
-Invoke-Tater -Command "net user tater Winter2016 /add && net localgroup administrators tater /add" –RunTime 10   
+Invoke-Tater -Trigger 2 -Command "net user tater Winter2016 /add && net localgroup administrators tater /add"     
 
-# Screenshot
-![tater](https://cloud.githubusercontent.com/assets/5897462/12635560/91220656-c552-11e5-96a2-1e5a2901404f.PNG)
+# Screenshots
+Windows 7 using trigger 1 (NBNS WPAD Bruteforce + Windows Defender Signature Updates)
+![tater2](https://cloud.githubusercontent.com/assets/5897462/12707930/d005af7c-c867-11e5-916d-20a015ed30ec.PNG)
+
+Windows 10 using trigger 2 (WebClient Service + Scheduled Task)
+![tater3](https://cloud.githubusercontent.com/assets/5897462/12707953/1f77c48c-c868-11e5-8ea3-5e0e26cd3bdd.PNG)
+
+Windows 7 using trigger 1 and UDP port exhaustion
+![tater4](https://cloud.githubusercontent.com/assets/5897462/12708234/673e3794-c86b-11e5-8cc0-398b7170b73f.PNG)
