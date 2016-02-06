@@ -7,7 +7,7 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 Potato - https://github.com/foxglovesec/Potato   
 
 # Notes
-This version has been successful for me on Windows 7, Windows 10, and Windows Server 2012 R2. I will hopefully be able to test it on the remaining Windows versions soon. Feel free to open issues here or reach out on Twitter @kevin_robertson with successes or failures for the remaining OS versions. 
+This version has been successful for me on Windows 7, Windows 8.1, Windows 10, and Windows Server 2012 R2. I will hopefully be able to test it on Windows Server 2008 soon. Feel free to open issues here or reach out on Twitter @kevin_robertson with successes or failures for the remaining OS versions. 
 
 # Usage
 To import with Import-Module:   
