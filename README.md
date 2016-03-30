@@ -13,24 +13,24 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 * The main Tater function.  
 
 ##### Parameters
-* __IP__ - Specify a specific local IP address.  
+* __IP__ - Specify a specific local IP address. An IP address will be selected automatically if this parameter is not used.  
 * __SpooferIP__ - Specify an IP address for NBNS spoofing. This is needed when using two hosts to get around an in-use port 80 on the privesc target.  
 * __Command__ - Command to execute as SYSTEM on the localhost.  
 * __NBNS__ - Default = Enabled: (Y/N) Enable/Disable NBNS bruteforce spoofing.  
 * __NBNSLimit__ - Default = Enabled: (Y/N) Enable/Disable NBNS bruteforce spoofer limiting to stop NBNS spoofing while hostname is resolving correctly.   
-* __ExhaustUDP__ - Default = Disabled: Enable/Disable UDP port exhaustion to force all DNS lookups to fail in order to fallback to NBNS resolution.  
-* __HTTPPort__ - Default = 80: Specify a TCP port for HTTP listener and redirect response.  
-* __Hostname__ - Default = WPAD: Hostname to spoof. "WPAD.DOMAIN.TLD" may be required by Windows Server 2008.  
-* __WPADDirectHosts__ - Comma separated list of hosts to list as direct in the wpad.dat file. Note that 'localhost' is always listed as direct.  
+* __ExhaustUDP__ - Default = Disabled: (Y/N) Enable/Disable UDP port exhaustion to force all DNS lookups to fail in order to fallback to NBNS resolution.  
+* __HTTPPort__ - Default = 80: Specify a TCP port for the HTTP listener and redirect response.  
+* __Hostname__ - Default = WPAD: Hostname to spoof. WPAD.DOMAIN.TLD may be required by Windows Server 2008.  
+* __WPADDirectHosts__ - Comma separated list of hosts to list as direct in the wpad.dat file. Note that localhost is always listed as direct.  
 * __WPADPort__ - Default = 80: Specify a proxy server port to be included in the wpad.dat file.  
 * __Trigger__ - Default = 1: Trigger type to use in order to trigger HTTP to SMB relay. 0 = None, 1 = Windows Defender Signature Update, 2 = Windows 10 Webclient/Scheduled Task  
-* __Taskname__ - Default = Tater: Scheduled task name to use with trigger 2.  
+* __TaskDelete__ - Default = Enabled: (Y/N) Enable/Disable scheduled task deletion for trigger 2. If enabled, a random string will be added to the taskname to avoid failures after multiple trigger 2 runs.  
+* __Taskname__ - Default = Tater: Scheduled task name to use with trigger 2. If you observe that Tater does not work after multiple trigger 2 runs, try changing the taskname.   
 * __RunTime__ - Default = Unlimited: (Integer) Set the run time duration in minutes.  
-* __ConsoleOutput__ - Default = Disabled: (Y/N) Enable/Disable real time console output. If using this option through a shell, test to ensure that it doesn't hang the shell.  
-* __FileOutput__ - Default = Disabled: (Y/N) Enable/Disable real time file output.  
-* __StatusOutput__ - Default = Enabled: (Y/N) Enable/Disable startup and shutdown messages.  
+* __ConsoleOutput__ - Default = Disabled: (Y/N) Enable/Disable real time console output. If using this option through a shell, test to ensure that it doesn't hang the shell.   
+* __StatusOutput__ - Default = Enabled: (Y/N) Enable/Disable startup messages.  
 * __ShowHelp__ - Default = Enabled: (Y/N) Enable/Disable the help messages at startup.  
-* __Tool__ - Default = 0: (0,1,2) Enable/Disable features for better operation through external tools such as Metasploit's Interactive Powershell Sessions and Empire. 0 = None, 1 = Metasploit, 2 = Empire 
+* __Tool__ - Default = 0: (0,1,2) Enable/Disable features for better operation through external tools such as Metasploit's Interactive Powershell Sessions and Empire. 0 = None, 1 = Metasploit, 2 = Empire  
 
 ### Stop-Tater
 * Function to manually stop Invoke-Tater.  
