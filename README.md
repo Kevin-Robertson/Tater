@@ -15,7 +15,7 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 ##### Parameters
 * __IP__ - Specify a specific local IP address. An IP address will be selected automatically if this parameter is not used.  
 * __SpooferIP__ - Specify an IP address for NBNS spoofing. This is needed when using two hosts to get around an in-use port 80 on the privesc target.  
-* __Command__ - Command to execute as SYSTEM on the localhost.  
+* __Command__ - Command to execute as SYSTEM on the localhost. Use PowerShell character escapes where necessary.  
 * __NBNS__ - Default = Enabled: (Y/N) Enable/Disable NBNS bruteforce spoofing.  
 * __NBNSLimit__ - Default = Enabled: (Y/N) Enable/Disable NBNS bruteforce spoofer limiting to stop NBNS spoofing while hostname is resolving correctly.   
 * __ExhaustUDP__ - Default = Disabled: (Y/N) Enable/Disable UDP port exhaustion to force all DNS lookups to fail in order to fallback to NBNS resolution.  
