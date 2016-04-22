@@ -8,6 +8,7 @@ All credit goes to @breenmachine, @foxglovesec, Google Project Zero, and anyone 
 ## Included In
 * p0wnedShell - https://github.com/Cn33liz/p0wnedShell   
 * PowerShell Empire - https://github.com/PowerShellEmpire/Empire  
+* PS>Attack - https://github.com/jaredhaight/psattack  
 
 ## Functions
 ### Invoke-Tater  
